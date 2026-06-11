@@ -32,3 +32,57 @@ async def log_db_version(connection: AsyncConnection) -> None:
     except Exception as e:
         logger.warning(f"Failed to fetch DB version: {e}")
     
+# Функция, возвращающая открытое соединение с СУБД PostgreSQL
+async def get_pg_conniction(
+    db_name: str,
+    host: str,
+    port: int,
+    user: str,
+    password: str
+    ) -> AsyncConnection:
+    conninfo = build_pg_conninfo(db_name, host, port, user, password)
+    connection: AsyncConnection | None = None
+    
+    try:
+        connection = await AsyncConnection.connect(conninfo=conninfo)
+        await log_db_version(connection)
+        return connection
+    except Exception as e:
+        logger.exception("Failed to connect to PostgreSQL: %s", e)
+        if connection:
+            await connection.close()
+        raise
+    
+# Функция, возвращающая пул соединений с СУБД PostgreSQL
+async def get_pg_pool(
+    db_name: str,
+    host: str,
+    port: int,
+    user: str,
+    password: str,
+    min_size: int = 1,
+    max_size: int = 3,
+    timeout: float | None = 10.0
+    ) -> AsyncConnectionPool:
+    conninfo = build_pg_conninfo(db_name, host, port, user, password)
+    db_pool: AsyncConnectionPool | None = None
+    
+    try:
+        db_pool = AsyncConnectionPool(
+            conninfo=conninfo,
+            min_size=min_size,
+            max_size=max_size,
+            timeout=timeout,
+            open=False
+        )
+        await db_pool.open()
+        
+        async with db_pool.connection() as connection:
+            await log_db_version(connection)
+            
+        return db_pool
+    except Exception as e:
+        logger.exception("Failed to initialize PostgreSQL pool: %s", e)
+        if db_pool and not db_pool.closed:
+            await db_pool.close()
+        raise
